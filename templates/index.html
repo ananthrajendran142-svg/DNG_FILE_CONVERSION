@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DGN to PDF Converter</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --success: #16a34a;
+            --success-hover: #15803d;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --text: #0f172a;
+            --muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #1e293b;
+        }
+
+        header p {
+            color: var(--muted);
+            margin-top: 0.25rem;
+            font-size: 1rem;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            color: #334155;
+        }
+
+        .file-upload-box {
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            background: #f1f5f9;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .file-upload-box:hover, .file-upload-box.drag-over {
+            border-color: var(--primary);
+            background: #e0f2fe;
+        }
+
+        .file-upload-box input {
+            display: none;
+        }
+
+        .file-label-text {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .file-subtext {
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-top: 0.35rem;
+        }
+
+        .selected-badge {
+            display: inline-block;
+            margin-top: 0.65rem;
+            padding: 0.35rem 0.9rem;
+            background: #dbeafe;
+            color: #1e40af;
+            border-radius: 999px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .options-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        @media (max-width: 600px) {
+            .options-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        select {
+            width: 100%;
+            padding: 0.65rem 0.75rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: #ffffff;
+            color: var(--text);
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        select:focus {
+            border-color: var(--primary);
+        }
+
+        .btn-submit {
+            display: block;
+            width: 100%;
+            background: var(--primary);
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.85rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 1.25rem;
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            background: var(--primary-hover);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-download {
+            display: inline-block;
+            background: var(--success);
+            color: #ffffff;
+            text-decoration: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: background 0.2s;
+        }
+
+        .btn-download:hover {
+            background: var(--success-hover);
+        }
+
+        .status-box {
+            display: none;
+            text-align: center;
+            padding: 1rem;
+            margin-top: 1rem;
+            border-radius: 8px;
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 500;
+        }
+
+        .status-box.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .result-section {
+            display: none;
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .result-info h3 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #1e293b;
+        }
+
+        .result-info p {
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-top: 0.2rem;
+        }
+
+        .pdf-viewer-frame {
+            width: 100%;
+            height: 600px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #525659;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>DGN to PDF Converter</h1>
+        <p>Upload a MicroStation DGN file to convert it into a vector PDF</p>
+    </header>
+
+    <!-- Upload Card -->
+    <div class="card">
+        <form id="convertForm">
+            <div class="form-group">
+                <label>Select DGN File</label>
+                <div class="file-upload-box" id="dropBox" onclick="document.getElementById('dgnInput').click()">
+                    <input type="file" id="dgnInput" accept=".dgn">
+                    <div class="file-label-text" id="fileLabel">Click to browse or drop your .dgn file here</div>
+                    <div class="file-subtext">Supports MicroStation V7 (ISFF) and V8 CAD formats</div>
+                    <div id="selectedPill" style="display: none;" class="selected-badge"></div>
+                </div>
+            </div>
+
+            <!-- Settings -->
+            <div class="options-grid">
+                <div>
+                    <label for="paperSize">Paper Size</label>
+                    <select id="paperSize" name="paper_size">
+                        <option value="A1" selected>A1 Architectural (841 x 594 mm) - Recommended</option>
+                        <option value="A4">A4 Standard (297 x 210 mm)</option>
+                        <option value="A3">A3 Standard (420 x 297 mm)</option>
+                        <option value="A0">A0 Large Format (1189 x 841 mm)</option>
+                        <option value="Auto">Auto-Fit to CAD Drawing</option>
+                        <option value="Letter">US Letter</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="theme">Color Theme</label>
+                    <select id="theme" name="theme">
+                        <option value="white" selected>White (Standard Print)</option>
+                        <option value="blueprint">Blueprint Blue</option>
+                        <option value="dark">Dark CAD Station</option>
+                        <option value="cream">Architectural Cream</option>
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-submit" id="submitBtn">Convert to PDF</button>
+        </form>
+
+        <div class="status-box" id="statusBox"></div>
+    </div>
+
+    <!-- Result Card -->
+    <div class="card result-section" id="resultCard">
+        <div class="result-header">
+            <div class="result-info">
+                <h3 id="resFileName">drawing.pdf</h3>
+                <p id="resDetails">Size: 0 KB</p>
+            </div>
+            <a href="#" id="downloadLink" class="btn-download" download>Download PDF</a>
+        </div>
+
+        <iframe id="pdfFrame" class="pdf-viewer-frame" src="about:blank" title="PDF Viewer"></iframe>
+    </div>
+</div>
+
+<script>
+    let selectedFile = null;
+
+    const dgnInput = document.getElementById('dgnInput');
+    const dropBox = document.getElementById('dropBox');
+    const selectedPill = document.getElementById('selectedPill');
+    const fileLabel = document.getElementById('fileLabel');
+    const submitBtn = document.getElementById('submitBtn');
+    const statusBox = document.getElementById('statusBox');
+    const resultCard = document.getElementById('resultCard');
+    const downloadLink = document.getElementById('downloadLink');
+    const pdfFrame = document.getElementById('pdfFrame');
+    const resFileName = document.getElementById('resFileName');
+    const resDetails = document.getElementById('resDetails');
+
+    dgnInput.addEventListener('change', function(e) {
+        if (e.target.files && e.target.files.length > 0) {
+            handleFile(e.target.files[0]);
+        }
+    });
+
+    ['dragenter', 'dragover'].forEach(name => {
+        dropBox.addEventListener(name, function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dropBox.classList.add('drag-over');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(name => {
+        dropBox.addEventListener(name, function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dropBox.classList.remove('drag-over');
+        });
+    });
+
+    dropBox.addEventListener('drop', function(e) {
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFile(e.dataTransfer.files[0]);
+        }
+    });
+
+    function handleFile(file) {
+        if (!file.name.toLowerCase().endsWith('.dgn')) {
+            alert('Please select a valid .dgn file.');
+            return;
+        }
+        selectedFile = file;
+        selectedPill.textContent = 'Selected: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+        selectedPill.style.display = 'inline-block';
+        fileLabel.textContent = 'Change file...';
+    }
+
+    document.getElementById('convertForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        if (!selectedFile) {
+            alert('Please select a DGN file first.');
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Converting... Please wait';
+        statusBox.style.display = 'block';
+        statusBox.className = 'status-box';
+        statusBox.textContent = 'Processing DGN and generating vector PDF...';
+
+        const paperSize = document.getElementById('paperSize').value;
+        const theme = document.getElementById('theme').value;
+
+        try {
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('paper_size', paperSize);
+            formData.append('theme', theme);
+
+            const res = await fetch('/convert', { method: 'POST', body: formData });
+            const rawText = await res.text();
+            let data;
+            try {
+                data = JSON.parse(rawText);
+            } catch (err) {
+                throw new Error('Server returned an unexpected response. Please check server logs.');
+            }
+
+            if (!res.ok || !data.success) {
+                throw new Error(data.error || 'Conversion failed.');
+            }
+
+            // Success: update UI
+            statusBox.style.display = 'none';
+            resultCard.style.display = 'block';
+            resFileName.textContent = data.pdf_filename;
+            resDetails.textContent = 'Format: ' + data.metadata.dgn_version + 
+                ' | Output PDF Size: ' + data.metadata.output_size_formatted + 
+                ' | Vectors: ' + data.metadata.vector_elements_count + 
+                ' | Time: ' + data.metadata.total_time_seconds + 's';
+
+            downloadLink.href = data.download_url;
+            downloadLink.download = data.pdf_filename;
+            pdfFrame.src = data.view_url;
+
+            // Scroll down to result
+            resultCard.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (err) {
+            statusBox.style.display = 'block';
+            statusBox.className = 'status-box error';
+            statusBox.textContent = 'Error: ' + err.message;
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Convert to PDF';
+        }
+    });
+</script>
+
+</body>
+</html>

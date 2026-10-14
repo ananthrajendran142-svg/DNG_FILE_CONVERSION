@@ -1,0 +1,6 @@
+aspose-cad>=24.0.0
+pymupdf>=1.24.0
+flask>=3.0.0
+werkzeug>=3.0.0
+olefile>=0.46
+requests>=2.31.0

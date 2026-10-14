@@ -9,6 +9,24 @@ import sys
 os.environ["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"] = "1"
 os.environ["COMPlus_GlobalizationInvariant"] = "1"
 
+# Preload OpenSSL 1.1 compatibility libraries on Linux (fixes "No usable version of libssl was found" crash)
+if sys.platform.startswith("linux"):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    lib_dir = os.path.join(base_dir, "lib")
+    if os.path.isdir(lib_dir):
+        curr_ld = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{curr_ld}" if curr_ld else lib_dir
+        try:
+            import ctypes
+            crypto_so = os.path.join(lib_dir, "libcrypto.so.1.1")
+            ssl_so = os.path.join(lib_dir, "libssl.so.1.1")
+            if os.path.exists(crypto_so):
+                ctypes.CDLL(crypto_so, mode=ctypes.RTLD_GLOBAL)
+            if os.path.exists(ssl_so):
+                ctypes.CDLL(ssl_so, mode=ctypes.RTLD_GLOBAL)
+        except Exception as e:
+            print(f"Warning preloading OpenSSL 1.1: {e}", file=sys.stderr)
+
 import uuid
 import time
 import traceback

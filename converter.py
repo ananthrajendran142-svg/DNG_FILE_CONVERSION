@@ -32,6 +32,7 @@ if sys.platform.startswith("linux"):
 
 import time
 import json
+import re
 import struct
 import subprocess
 import traceback
@@ -121,23 +122,50 @@ def get_paper_size(paper_name='A4', orientation='auto', img_aspect=1.33):
 
 
 def clean_cad_watermark(pdf_path, output_pdf_path=None):
-    """Strips out evaluation watermark vectors and text from CAD-generated PDF."""
+    """
+    Strips evaluation watermark artifacts to ensure a 100% clean CAD PDF.
+    Removes full-sheet dashed diagonal cross lines, evaluation banner boxes,
+    and text without leaving solid redaction marks on dark or blueprint themes.
+    """
     if output_pdf_path is None:
         output_pdf_path = pdf_path
 
     doc = pymupdf.open(pdf_path)
     try:
         for page in doc:
+            # Transparent text redactions to prevent solid black boxes on dark/blueprint themes
             for text_pattern in ['Evaluation only', 'Created with Aspose', 'Aspose Pty Ltd']:
                 for rect in page.search_for(text_pattern):
-                    page.add_redact_annot(rect)
-                    page.apply_redactions()
+                    page.add_redact_annot(rect, fill=False)
+            page.apply_redactions()
 
             for xref in page.get_contents():
                 stream = doc.xref_stream(xref).decode('latin1', errors='ignore')
-                idx = stream.rfind('q 1 1 1 RG')
-                if idx != -1:
-                    clean_stream = stream[:idx].strip()
+                cut_idx = None
+
+                # 1. Dashed diagonal cross watermark (covers both black and white cross passes)
+                # Matches: 'q <color> RG <linewidth> w [<dash> <dash>] <phase> d 0 0 m'
+                m = re.search(r'q\s+[0-9\.\s]+RG\s+[0-9\.]+\s+w\s*\[[0-9\.\s]+\]\s*[0-9\.]*\s*d\s*0\s+0\s+m', stream)
+                if m:
+                    cut_idx = m.start()
+                else:
+                    # Fallback: dashed line starting directly at origin (0, 0)
+                    m = re.search(r'\[[0-9\.\s]+\]\s*[0-9\.]*\s*d\s*0\s+0\s+m', stream)
+                    if m:
+                        q_idx = stream.rfind('q', 0, m.start())
+                        cut_idx = q_idx if q_idx != -1 else m.start()
+                    else:
+                        # Watermark evaluation banner background box starting at (0, 0)
+                        m = re.search(r'q\s+[0-9\.\s]+r[gG]\s+[0-9\.\s]*[rRgG]\s*0\s+0\s+m\s+[0-9\.]+\s+0\s+l', stream)
+                        if m:
+                            cut_idx = m.start()
+                        else:
+                            idx = stream.rfind('q 1 1 1 RG')
+                            if idx != -1:
+                                cut_idx = idx
+
+                if cut_idx is not None:
+                    clean_stream = stream[:cut_idx].strip()
                     tokens = clean_stream.split()
                     q_cnt = tokens.count('q')
                     Q_cnt = tokens.count('Q')

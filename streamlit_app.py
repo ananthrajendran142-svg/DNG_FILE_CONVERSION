@@ -1,7 +1,9 @@
 import os
 import sys
 import tempfile
+import base64
 import streamlit as st
+import pymupdf
 
 # Configure globalization and libraries on Linux
 os.environ["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"] = "1"
@@ -21,7 +23,18 @@ st.set_page_config(page_title="DGN to PDF Converter", page_icon="📐", layout="
 st.title("📐 DGN to PDF Converter")
 st.markdown("Convert Bentley MicroStation **DGN** drawings (V7 and V8) into sharp, clean, watermark-free vector **PDF** documents.")
 
+# Initialize session state for persistent preview
+if "converted_data" not in st.session_state:
+    st.session_state.converted_data = None
+if "last_file_name" not in st.session_state:
+    st.session_state.last_file_name = None
+
 uploaded_file = st.file_uploader("Upload MicroStation .dgn file", type=["dgn"])
+
+# Reset preview if a new file is uploaded
+if uploaded_file and uploaded_file.name != st.session_state.last_file_name:
+    st.session_state.converted_data = None
+    st.session_state.last_file_name = uploaded_file.name
 
 col1, col2 = st.columns(2)
 with col1:
@@ -46,7 +59,7 @@ with col2:
     )
 
 if st.button("Convert to PDF", type="primary", disabled=uploaded_file is None):
-    with st.spinner("Processing CAD elements and normalizing vectors..."):
+    with st.spinner("Processing CAD elements and generating preview..."):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".dgn") as tmp_in:
             tmp_in.write(uploaded_file.getbuffer())
             tmp_in_path = tmp_in.name
@@ -59,15 +72,25 @@ if st.button("Convert to PDF", type="primary", disabled=uploaded_file is None):
             with open(out_pdf_path, "rb") as f:
                 pdf_bytes = f.read()
 
-            st.success(f" Converted in {meta['total_time_seconds']}s! ({meta['vector_elements_count']} vector drawings, {meta['output_size_formatted']})")
+            # Generate high-resolution preview image of the first page
+            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+            png_bytes = None
+            if len(doc) > 0:
+                page = doc[0]
+                rect = page.rect
+                scale = 1600.0 / max(max(1.0, rect.width), max(1.0, rect.height))
+                mat = pymupdf.Matrix(scale, scale)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                png_bytes = pix.tobytes("png")
+            doc.close()
 
             dl_name = os.path.splitext(uploaded_file.name)[0] + ".pdf"
-            st.download_button(
-                label="📥 Download Vector PDF",
-                data=pdf_bytes,
-                file_name=dl_name,
-                mime="application/pdf"
-            )
+            st.session_state.converted_data = {
+                "pdf_bytes": pdf_bytes,
+                "png_bytes": png_bytes,
+                "dl_name": dl_name,
+                "meta": meta
+            }
         except Exception as e:
             st.error(f"Conversion Error: {e}")
         finally:
@@ -75,3 +98,47 @@ if st.button("Convert to PDF", type="primary", disabled=uploaded_file is None):
                 os.remove(tmp_in_path)
             if os.path.exists(out_pdf_path):
                 os.remove(out_pdf_path)
+
+# Display Preview and Download Option
+if st.session_state.converted_data:
+    data = st.session_state.converted_data
+    meta = data["meta"]
+
+    st.divider()
+    st.success(
+        f"✓ Converted in **{meta['total_time_seconds']}s**! "
+        f"({meta['vector_elements_count']} vectors · {meta['output_size_formatted']} · {meta['dgn_version']})"
+    )
+
+    # Download Button right above the preview
+    st.download_button(
+        label="📥 Download Vector PDF",
+        data=data["pdf_bytes"],
+        file_name=data["dl_name"],
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True
+    )
+
+    st.subheader("📄 Drawing Preview")
+
+    tab_visual, tab_interactive = st.tabs(["🖼️ High-Res Image Preview", "📑 Interactive PDF Viewer"])
+
+    with tab_visual:
+        if data["png_bytes"]:
+            st.image(
+                data["png_bytes"],
+                caption=f"{data['dl_name']} ({meta['paper_size']} · {meta['theme'].title()} Theme)",
+                use_container_width=True
+            )
+        else:
+            st.info("Preview image could not be rendered.")
+
+    with tab_interactive:
+        b64_pdf = base64.b64encode(data["pdf_bytes"]).decode("utf-8")
+        pdf_display = (
+            f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
+            f'width="100%" height="650" type="application/pdf" '
+            f'style="border: 1px solid #e2e8f0; border-radius: 8px;"></iframe>'
+        )
+        st.markdown(pdf_display, unsafe_allow_html=True)

@@ -3,6 +3,7 @@ import sys
 import tempfile
 import base64
 import streamlit as st
+import streamlit.components.v1 as components
 import pymupdf
 
 # Configure globalization and libraries on Linux
@@ -57,6 +58,131 @@ with col2:
         index=0,
         format_func=lambda x: theme_labels[x]
     )
+
+PDF_VIEWER_HTML = """<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #1e293b; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; color: white; }
+    #toolbar { background: #0f172a; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid #334155; }
+    button { background: #2563eb; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; transition: background 0.15s; }
+    button:hover { background: #1d4ed8; }
+    .badge { background: #334155; padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: 500; }
+    #canvas-container { display: flex; justify-content: center; padding: 20px 10px; overflow: auto; min-height: 580px; }
+    canvas { box-shadow: 0 8px 24px rgba(0,0,0,0.5); background: white; max-width: 100%; height: auto; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="prev">◀ Prev</button>
+    <span class="badge">Page <span id="page_num">1</span> / <span id="page_count">1</span></span>
+    <button id="next">Next ▶</button>
+    <span style="color: #64748b;">|</span>
+    <button id="zoom_out">🔍 -</button>
+    <span class="badge" id="zoom_percent">100%</span>
+    <button id="zoom_in">🔍 +</button>
+    <button id="zoom_fit">Fit Width</button>
+  </div>
+  <div id="canvas-container">
+    <canvas id="pdf-canvas"></canvas>
+  </div>
+  <script>
+    const pdfData = atob("__B64_PDF__");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    let pdfDoc = null,
+        pageNum = 1,
+        pageRendering = false,
+        pageNumPending = null,
+        scale = 1.0,
+        canvas = document.getElementById('pdf-canvas'),
+        ctx = canvas.getContext('2d');
+
+    function renderPage(num) {
+      pageRendering = true;
+      pdfDoc.getPage(num).then(function(page) {
+        let viewport = page.getViewport({scale: scale});
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        let renderContext = {
+          canvasContext: ctx,
+          viewport: viewport
+        };
+        let renderTask = page.render(renderContext);
+
+        renderTask.promise.then(function() {
+          pageRendering = false;
+          if (pageNumPending !== null) {
+            renderPage(pageNumPending);
+            pageNumPending = null;
+          }
+        });
+      });
+
+      document.getElementById('page_num').textContent = num;
+      document.getElementById('zoom_percent').textContent = Math.round(scale * 100) + '%';
+    }
+
+    function queueRenderPage(num) {
+      if (pageRendering) {
+        pageNumPending = num;
+      } else {
+        renderPage(num);
+      }
+    }
+
+    document.getElementById('prev').addEventListener('click', function() {
+      if (pageNum <= 1) return;
+      pageNum--;
+      queueRenderPage(pageNum);
+    });
+
+    document.getElementById('next').addEventListener('click', function() {
+      if (pageNum >= pdfDoc.numPages) return;
+      pageNum++;
+      queueRenderPage(pageNum);
+    });
+
+    document.getElementById('zoom_in').addEventListener('click', function() {
+      scale = Math.min(scale + 0.25, 3.5);
+      queueRenderPage(pageNum);
+    });
+
+    document.getElementById('zoom_out').addEventListener('click', function() {
+      scale = Math.max(scale - 0.25, 0.35);
+      queueRenderPage(pageNum);
+    });
+
+    document.getElementById('zoom_fit').addEventListener('click', function() {
+      pdfDoc.getPage(pageNum).then(function(page) {
+        let containerWidth = document.getElementById('canvas-container').clientWidth - 40;
+        let unscaledViewport = page.getViewport({scale: 1.0});
+        scale = Math.max(0.4, Math.min(containerWidth / unscaledViewport.width, 2.5));
+        queueRenderPage(pageNum);
+      });
+    });
+
+    pdfjsLib.getDocument({data: pdfData}).promise.then(function(pdfDoc_) {
+      pdfDoc = pdfDoc_;
+      document.getElementById('page_count').textContent = pdfDoc.numPages;
+      pdfDoc.getPage(1).then(function(page) {
+        let containerWidth = document.getElementById('canvas-container').clientWidth - 40;
+        let unscaledViewport = page.getViewport({scale: 1.0});
+        if (containerWidth > 200) {
+          scale = Math.max(0.4, Math.min(containerWidth / unscaledViewport.width, 1.5));
+        }
+        renderPage(pageNum);
+      });
+    }).catch(function(err) {
+      document.getElementById('canvas-container').innerHTML = '<div style="color:#f87171; padding:20px;">PDF Viewer Error: ' + err.message + '</div>';
+    });
+  </script>
+</body>
+</html>"""
 
 if st.button("Convert to PDF", type="primary", disabled=uploaded_file is None):
     with st.spinner("Processing CAD elements and generating preview..."):
@@ -122,7 +248,12 @@ if st.session_state.converted_data:
 
     st.subheader("📄 Drawing Preview")
 
-    tab_visual, tab_interactive = st.tabs(["🖼️ High-Res Image Preview", "📑 Interactive PDF Viewer"])
+    tab_interactive, tab_visual = st.tabs(["📑 Interactive PDF Viewer", "🖼️ High-Res Image View"])
+
+    with tab_interactive:
+        b64_pdf = base64.b64encode(data["pdf_bytes"]).decode("utf-8")
+        viewer_html = PDF_VIEWER_HTML.replace("__B64_PDF__", b64_pdf)
+        components.html(viewer_html, height=720, scrolling=True)
 
     with tab_visual:
         if data["png_bytes"]:
@@ -133,12 +264,3 @@ if st.session_state.converted_data:
             )
         else:
             st.info("Preview image could not be rendered.")
-
-    with tab_interactive:
-        b64_pdf = base64.b64encode(data["pdf_bytes"]).decode("utf-8")
-        pdf_display = (
-            f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
-            f'width="100%" height="650" type="application/pdf" '
-            f'style="border: 1px solid #e2e8f0; border-radius: 8px;"></iframe>'
-        )
-        st.markdown(pdf_display, unsafe_allow_html=True)

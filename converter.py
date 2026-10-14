@@ -355,12 +355,16 @@ def convert_dgn_direct(input_path, output_pdf_path, thumb_path=None, options=Non
     return result_meta
 
 
-def convert_dgn(input_path, output_pdf_path, thumb_path=None, options=None, isolated=True):
+def convert_dgn(input_path, output_pdf_path, thumb_path=None, options=None, isolated=None):
     """
     Main conversion entrypoint.
-    Executes conversion in an isolated process to guarantee clean memory,
-    main thread execution, and COM/OLE stability on Windows.
+    On Windows: Uses isolated subprocess to guarantee COM/OLE multi-threading stability.
+    On Linux (e.g. Render): Uses direct in-process execution to avoid duplicating process
+    memory, keeping RAM usage well under the 512 MB cloud hosting limit.
     """
+    if isolated is None:
+        isolated = (sys.platform == 'win32')
+
     if not isolated:
         return convert_dgn_direct(input_path, output_pdf_path, thumb_path, options)
 

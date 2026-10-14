@@ -385,7 +385,8 @@
             try {
                 data = JSON.parse(rawText);
             } catch (err) {
-                throw new Error('Server returned an unexpected response. Please check server logs.');
+                const cleanMsg = rawText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim().substring(0, 200);
+                throw new Error(`Server status ${res.status} (${res.statusText || 'Error'}): ${cleanMsg || 'No error details provided by host.'}`);
             }
 
             if (!res.ok || !data.success) {

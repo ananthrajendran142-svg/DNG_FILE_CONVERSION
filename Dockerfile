@@ -16,8 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY . .
 
-# Expose Render PORT
+# Expose Render PORT and configure .NET globalization
 ENV PORT=5000
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+ENV COMPlus_GlobalizationInvariant=1
 EXPOSE 5000
 
 CMD ["python", "app.py"]

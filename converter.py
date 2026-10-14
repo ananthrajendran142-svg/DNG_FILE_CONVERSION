@@ -7,6 +7,11 @@ Configured with High-Precision CAD rendering and Text Normalization.
 
 import os
 import sys
+
+# Ensure .NET Core globalization invariant mode on Linux (fixes missing ICU package crash)
+os.environ["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"] = "1"
+os.environ["COMPlus_GlobalizationInvariant"] = "1"
+
 import time
 import json
 import struct
@@ -348,7 +353,11 @@ def convert_dgn(input_path, output_pdf_path, thumb_path=None, options=None, isol
 
     cmd = [python_exe, script_path, input_path, output_pdf_path, thumb_arg, opts_json]
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    sub_env = os.environ.copy()
+    sub_env["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"] = "1"
+    sub_env["COMPlus_GlobalizationInvariant"] = "1"
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=sub_env)
 
     if proc.returncode != 0:
         err_msg = proc.stderr.strip() or proc.stdout.strip() or f"Process exited with code {proc.returncode}"

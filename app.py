@@ -3,6 +3,12 @@ Simple Python Flask Server for DGN to PDF Conversion
 """
 
 import os
+import sys
+
+# Ensure .NET Core globalization invariant mode on Linux (fixes missing ICU package crash)
+os.environ["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"] = "1"
+os.environ["COMPlus_GlobalizationInvariant"] = "1"
+
 import uuid
 import time
 import traceback

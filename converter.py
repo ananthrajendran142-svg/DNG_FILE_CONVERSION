@@ -257,7 +257,12 @@ def convert_dgn_direct(input_path, output_pdf_path, thumb_path=None, options=Non
     dgn_to_load = sanitize_dgn_file(input_path)
     try:
         print(f"Loading CAD image from {input_path}...", file=sys.stderr)
-        image = cad.Image.load(dgn_to_load)
+        load_opts = cad.LoadOptions()
+        try:
+            load_opts.ignore_errors = True
+        except Exception:
+            pass
+        image = cad.Image.load(dgn_to_load, load_opts)
     finally:
         if dgn_to_load != input_path and os.path.exists(dgn_to_load):
             try:
@@ -355,16 +360,13 @@ def convert_dgn_direct(input_path, output_pdf_path, thumb_path=None, options=Non
     return result_meta
 
 
-def convert_dgn(input_path, output_pdf_path, thumb_path=None, options=None, isolated=None):
+def convert_dgn(input_path, output_pdf_path, thumb_path=None, options=None, isolated=True):
     """
     Main conversion entrypoint.
-    On Windows: Uses isolated subprocess to guarantee COM/OLE multi-threading stability.
-    On Linux (e.g. Render): Uses direct in-process execution to avoid duplicating process
-    memory, keeping RAM usage well under the 512 MB cloud hosting limit.
+    Executes conversion in an isolated subprocess on the OS main thread.
+    This guarantees thread safety and prevents IndexOutOfRangeException / COM errors
+    when called inside background worker thread pools (such as Flask or Streamlit).
     """
-    if isolated is None:
-        isolated = (sys.platform == 'win32')
-
     if not isolated:
         return convert_dgn_direct(input_path, output_pdf_path, thumb_path, options)
 

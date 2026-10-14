@@ -157,7 +157,12 @@ def convert_dgn_to_pdf(input_dgn_path, output_pdf_path=None, page_width=2384.0, 
 
     print(f"\n[1/3] Loading DGN: {input_dgn_path}...")
     try:
-        cad_image = cad.Image.load(dgn_to_load)
+        load_opts = cad.LoadOptions()
+        try:
+            load_opts.ignore_errors = True
+        except Exception:
+            pass
+        cad_image = cad.Image.load(dgn_to_load, load_opts)
     finally:
         if dgn_to_load != input_dgn_path and os.path.exists(dgn_to_load):
             try:

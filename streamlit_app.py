@@ -54,7 +54,7 @@ if st.button("Convert to PDF", type="primary", disabled=uploaded_file is None):
         out_pdf_path = tmp_in_path + ".pdf"
         try:
             options = {"paper_size": paper_size, "theme": theme, "orientation": "auto"}
-            meta = converter.convert_dgn(tmp_in_path, out_pdf_path, options=options)
+            meta = converter.convert_dgn(tmp_in_path, out_pdf_path, options=options, isolated=True)
 
             with open(out_pdf_path, "rb") as f:
                 pdf_bytes = f.read()

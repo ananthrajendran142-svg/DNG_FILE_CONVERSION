@@ -122,7 +122,15 @@ def api_convert():
         options = {'paper_size': paper_size, 'theme': theme, 'orientation': 'auto'}
 
         with LOCK:
-            meta = converter.convert_dgn(input_path, output_pdf, thumb_path=thumb_png, options=options)
+            meta = converter.convert_dgn(input_path, output_pdf, thumb_path=thumb_png, options=options, isolated=False)
+            import gc
+            gc.collect()
+
+        if os.path.exists(input_path):
+            try:
+                os.remove(input_path)
+            except OSError:
+                pass
 
         clean_pdf_name = os.path.splitext(orig_name)[0] + '.pdf'
         ACTIVE_FILES[file_id] = {
@@ -182,7 +190,15 @@ def convert():
     options = {'paper_size': paper_size, 'theme': theme, 'orientation': 'auto'}
 
     with LOCK:
-        meta = converter.convert_dgn(input_path, output_pdf, options=options)
+        meta = converter.convert_dgn(input_path, output_pdf, options=options, isolated=False)
+        import gc
+        gc.collect()
+
+    if os.path.exists(input_path):
+        try:
+            os.remove(input_path)
+        except OSError:
+            pass
 
     clean_pdf_name = os.path.splitext(orig_name)[0] + '.pdf'
     ACTIVE_FILES[file_id] = {

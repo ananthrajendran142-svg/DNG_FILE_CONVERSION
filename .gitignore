@@ -16,6 +16,9 @@ outputs/
 !samples/*.dgn
 samples/House_Model.dgn
 
+# Office lock files
+~$*
+
 # Environment & IDE
 .vscode/
 .idea/

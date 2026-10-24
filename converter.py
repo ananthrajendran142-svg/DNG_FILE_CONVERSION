@@ -186,6 +186,76 @@ def clean_cad_watermark(pdf_path, output_pdf_path=None):
         return False
 
 
+THEME_BG_COLORS = {
+    'blueprint': (12 / 255.0, 36 / 255.0, 70 / 255.0),
+    'dark': (18 / 255.0, 24 / 255.0, 38 / 255.0),
+    'cream': (252 / 255.0, 250 / 255.0, 242 / 255.0),
+    'white': (1.0, 1.0, 1.0),
+}
+
+
+def normalize_pdf_page_size(pdf_path, target_w, target_h, theme='white'):
+    """
+    Normalizes PDF page dimensions to the requested target size (e.g. A1, A3, A4).
+    MicroStation DGN files (especially V7 in master units/UOR) often cause Aspose.CAD
+    to export giant raw coordinate canvases (e.g. 14,000+ pt / 200 inches wide),
+    ignoring rasterization page dimensions. When opened in Microsoft Edge or Google Chrome,
+    extreme zoom-out causes hairline strokes to disappear below subpixel thresholds,
+    rendering pages completely blank.
+    This function embeds the vector drawing into standard architectural page rects,
+    centering it with exact margins and matching background theme.
+    """
+    if not os.path.exists(pdf_path):
+        return False
+
+    try:
+        doc = pymupdf.open(pdf_path)
+        if len(doc) == 0:
+            doc.close()
+            return False
+
+        src_page = doc[0]
+        src_rect = src_page.rect
+        w_diff = abs(src_rect.width - target_w) / max(1.0, target_w)
+        h_diff = abs(src_rect.height - target_h) / max(1.0, target_h)
+
+        # If already matching target within 2%, no resizing needed
+        if w_diff < 0.02 and h_diff < 0.02:
+            doc.close()
+            return True
+
+        bg_color = THEME_BG_COLORS.get((theme or 'white').lower(), (1.0, 1.0, 1.0))
+
+        new_doc = pymupdf.open()
+        for page_idx in range(len(doc)):
+            page = doc[page_idx]
+            rect = page.rect
+            scale = min(target_w / max(1.0, rect.width), target_h / max(1.0, rect.height))
+            scaled_w = rect.width * scale
+            scaled_h = rect.height * scale
+            offset_x = (target_w - scaled_w) / 2.0
+            offset_y = (target_h - scaled_h) / 2.0
+            dest_rect = pymupdf.Rect(offset_x, offset_y, offset_x + scaled_w, offset_y + scaled_h)
+
+            new_page = new_doc.new_page(width=target_w, height=target_h)
+            if bg_color:
+                new_page.draw_rect(new_page.rect, color=None, fill=bg_color)
+            new_page.show_pdf_page(dest_rect, doc, page_idx)
+
+        temp_norm = pdf_path + '.norm.tmp'
+        new_doc.save(temp_norm, deflate=True)
+        new_doc.close()
+        doc.close()
+
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+        os.rename(temp_norm, pdf_path)
+        return True
+    except Exception as e:
+        print(f"Warning during PDF page normalization: {e}")
+        return False
+
+
 def generate_pdf_thumbnail(pdf_path, thumb_path, max_dim=1200):
     """Renders a crisp thumbnail preview of the first page of the PDF."""
     try:
@@ -310,7 +380,7 @@ def convert_dgn_direct(input_path, output_pdf_path, thumb_path=None, options=Non
     raster_opts.no_scaling = False
     
     # Line scale tuning: fine lines prevent dense walls from smearing
-    raster_opts.line_scale = 0.35
+    raster_opts.line_scale = float(options.get("line_scale", 0.5)) if options else 0.5
 
     # Text rendering hint & smoothing mode for crisp typography and clean arcs
     try:
@@ -352,6 +422,9 @@ def convert_dgn_direct(input_path, output_pdf_path, thumb_path=None, options=Non
             os.remove(temp_raw_pdf)
         except OSError:
             pass
+
+    # Normalize canvas to standard page dimensions to prevent blank rendering in Edge/Chrome
+    normalize_pdf_page_size(output_pdf_path, target_w, target_h, theme=theme)
 
     thumb_generated = False
     if thumb_path:

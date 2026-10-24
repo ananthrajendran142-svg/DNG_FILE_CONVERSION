@@ -29,6 +29,7 @@ if sys.platform.startswith("linux"):
 
 import uuid
 import time
+import base64
 import traceback
 import threading
 from flask import Flask, render_template, request, jsonify, send_file
@@ -54,6 +55,103 @@ ACTIVE_FILES = {}
 def handle_error(e):
     traceback.print_exc()
     return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+    return response
+
+
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    """Quick health check endpoint for Excel and other API clients."""
+    return jsonify({
+        'success': True,
+        'status': 'online',
+        'service': 'DGN to PDF Converter API'
+    })
+
+
+@app.route('/api/convert', methods=['POST'])
+def api_convert():
+    """
+    REST API endpoint for programmatic and Excel web-connected conversions.
+    Supports both Base64 JSON and multipart/form-data.
+    """
+    try:
+        file_bytes = None
+        orig_name = "drawing.dgn"
+        paper_size = "A1"
+        theme = "white"
+
+        if request.is_json:
+            data = request.get_json() or {}
+            b64_content = data.get('file_base64')
+            if not b64_content:
+                return jsonify({'success': False, 'error': 'Missing file_base64 in JSON payload.'}), 400
+            orig_name = secure_filename(data.get('file_name', 'drawing.dgn'))
+            paper_size = data.get('paper_size', 'A1')
+            theme = data.get('theme', 'white')
+            try:
+                file_bytes = base64.b64decode(b64_content)
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'Invalid base64 payload: {str(e)}'}), 400
+        elif 'file' in request.files and request.files['file'].filename != '':
+            f = request.files['file']
+            orig_name = secure_filename(f.filename)
+            paper_size = request.form.get('paper_size', 'A1')
+            theme = request.form.get('theme', 'white')
+            file_bytes = f.read()
+        else:
+            return jsonify({'success': False, 'error': 'No file provided. Send JSON with file_base64 or multipart file.'}), 400
+
+        if not orig_name.lower().endswith('.dgn'):
+            orig_name += '.dgn'
+
+        file_id = str(uuid.uuid4())
+        input_path = os.path.join(UPLOAD_DIR, f"{file_id}_{orig_name}")
+        output_pdf = os.path.join(OUTPUT_DIR, f"{file_id}.pdf")
+        thumb_png = os.path.join(OUTPUT_DIR, f"{file_id}_thumb.png")
+
+        with open(input_path, 'wb') as f_out:
+            f_out.write(file_bytes)
+
+        options = {'paper_size': paper_size, 'theme': theme, 'orientation': 'auto'}
+
+        with LOCK:
+            meta = converter.convert_dgn(input_path, output_pdf, thumb_path=thumb_png, options=options)
+
+        clean_pdf_name = os.path.splitext(orig_name)[0] + '.pdf'
+        ACTIVE_FILES[file_id] = {
+            'path': output_pdf,
+            'name': clean_pdf_name,
+            'created': time.time()
+        }
+
+        with open(output_pdf, 'rb') as f_pdf:
+            pdf_b64 = base64.b64encode(f_pdf.read()).decode('utf-8')
+
+        thumb_b64 = ""
+        if os.path.exists(thumb_png):
+            with open(thumb_png, 'rb') as f_th:
+                thumb_b64 = base64.b64encode(f_th.read()).decode('utf-8')
+
+        return jsonify({
+            'success': True,
+            'file_id': file_id,
+            'pdf_filename': clean_pdf_name,
+            'pdf_base64': pdf_b64,
+            'preview_base64': thumb_b64,
+            'download_url': f'/download/{file_id}',
+            'view_url': f'/view/{file_id}',
+            'metadata': meta
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/')

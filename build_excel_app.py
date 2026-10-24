@@ -211,8 +211,38 @@ Public Sub ConvertToPDF()
     Dim finalPdfPath As String
     finalPdfPath = saveDir & pdfName
     
-    ' Save PDF file
-    WriteBase64File pdfB64, finalPdfPath
+    ' Save PDF file (via streaming download or fallback base64)
+    Dim dlUrl As String
+    dlUrl = ExtractJsonVal(respText, "download_url")
+    Dim pdfSaved As Boolean
+    pdfSaved = False
+    
+    If dlUrl <> "" Then
+        ws.Range("B18").Value = "Downloading converted vector PDF..."
+        ws.Range("B18").Font.Color = RGB(37, 99, 235)
+        DoEvents
+        
+        Dim httpDl As Object
+        Set httpDl = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+        httpDl.setTimeouts 10000, 15000, 120000, 120000
+        httpDl.Open "GET", serverUrl & dlUrl, False
+        httpDl.send
+        If httpDl.Status = 200 Then
+            Dim streamOut As Object
+            Set streamOut = CreateObject("ADODB.Stream")
+            streamOut.Type = 1 ' adTypeBinary
+            streamOut.Open
+            streamOut.Write httpDl.responseBody
+            streamOut.SaveToFile finalPdfPath, 2 ' adSaveCreateOverWrite
+            streamOut.Close
+            pdfSaved = True
+        End If
+    End If
+    
+    If Not pdfSaved And pdfB64 <> "" Then
+        WriteBase64File pdfB64, finalPdfPath
+        pdfSaved = True
+    End If
     
     ' Extract metadata
     Dim dgnVer As String, vecCount As String, timeSec As String, outSize As String

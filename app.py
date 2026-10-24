@@ -139,8 +139,11 @@ def api_convert():
             'created': time.time()
         }
 
-        with open(output_pdf, 'rb') as f_pdf:
-            pdf_b64 = base64.b64encode(f_pdf.read()).decode('utf-8')
+        # Only base64 encode small files to prevent RAM exhaustion on free cloud instances
+        pdf_b64 = ""
+        if os.path.exists(output_pdf) and os.path.getsize(output_pdf) < 1500000:
+            with open(output_pdf, 'rb') as f_pdf:
+                pdf_b64 = base64.b64encode(f_pdf.read()).decode('utf-8')
 
         thumb_b64 = ""
         if os.path.exists(thumb_png):

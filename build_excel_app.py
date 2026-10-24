@@ -1,10 +1,12 @@
 """
 Builds the standalone, offline-ready DGN_Converter.xlsm workbook with embedded VBA macros.
 Supports 100% Offline Local Engine (via engine\\dgn_engine.exe) and Cloud API fallback.
+Compatible with OneDrive synced folders, Desktop, Documents, and normal drive paths.
 """
 
 import os
 import sys
+import shutil
 import win32com.client as win32
 
 EXCEL_PATH = os.path.abspath("DGN_Converter.xlsm")
@@ -15,18 +17,76 @@ VBA_CODE = r'''Option Explicit
 ' DGN TO VECTOR PDF CONVERTER - 100% OFFLINE & CLOUD EXCEL CLIENT
 ' ==============================================================================
 
-Private Function GetLocalEngine() As String
-    Dim p1 As String, p2 As String
-    p1 = ThisWorkbook.Path & "\engine\dgn_engine.exe"
-    p2 = ThisWorkbook.Path & "\dgn_engine.exe"
+Private Function GetLocalWorkbookPath() As String
+    Dim p As String
+    p = ThisWorkbook.Path
     
-    If Dir(p1) <> "" Then
-        GetLocalEngine = p1
-    ElseIf Dir(p2) <> "" Then
-        GetLocalEngine = p2
-    Else
-        GetLocalEngine = ""
+    ' If standard local drive path (e.g. C:\..., D:\...)
+    If Mid(p, 2, 1) = ":" Then
+        GetLocalWorkbookPath = p
+        Exit Function
     End If
+    
+    ' If OneDrive or SharePoint URL (e.g. https://d.docs.live.net/...)
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    Dim basePaths(5) As String
+    basePaths(0) = Environ("OneDrive")
+    basePaths(1) = Environ("OneDriveCommercial")
+    basePaths(2) = Environ("OneDriveConsumer")
+    basePaths(3) = Environ("USERPROFILE") & "\OneDrive"
+    basePaths(4) = Environ("USERPROFILE")
+    basePaths(5) = "C:\Users\anant"
+    
+    Dim i As Long, candidate As String
+    For i = 0 To 5
+        If basePaths(i) <> "" Then
+            candidate = basePaths(i) & "\Desktop\DGN_Offline_Converter"
+            If fso.FolderExists(candidate) Then GetLocalWorkbookPath = candidate: Exit Function
+            
+            candidate = basePaths(i) & "\DGN_Offline_Converter"
+            If fso.FolderExists(candidate) Then GetLocalWorkbookPath = candidate: Exit Function
+            
+            candidate = basePaths(i) & "\Downloads\DGN"
+            If fso.FolderExists(candidate) Then GetLocalWorkbookPath = candidate: Exit Function
+        End If
+    Next i
+    
+    If fso.FolderExists("C:\Users\anant\OneDrive\Desktop\DGN_Offline_Converter") Then
+        GetLocalWorkbookPath = "C:\Users\anant\OneDrive\Desktop\DGN_Offline_Converter"
+        Exit Function
+    End If
+    
+    If fso.FolderExists("C:\Users\anant\Downloads\DGN") Then
+        GetLocalWorkbookPath = "C:\Users\anant\Downloads\DGN"
+        Exit Function
+    End If
+    
+    GetLocalWorkbookPath = Environ("USERPROFILE") & "\Downloads"
+End Function
+
+Private Function GetLocalEngine() As String
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    Dim localDir As String
+    localDir = GetLocalWorkbookPath()
+    
+    Dim p As String
+    p = localDir & "\engine\dgn_engine.exe"
+    If fso.FileExists(p) Then GetLocalEngine = p: Exit Function
+    
+    p = localDir & "\dgn_engine.exe"
+    If fso.FileExists(p) Then GetLocalEngine = p: Exit Function
+    
+    p = "C:\Users\anant\OneDrive\Desktop\DGN_Offline_Converter\engine\dgn_engine.exe"
+    If fso.FileExists(p) Then GetLocalEngine = p: Exit Function
+    
+    p = "C:\Users\anant\Downloads\DGN\engine\dgn_engine.exe"
+    If fso.FileExists(p) Then GetLocalEngine = p: Exit Function
+    
+    GetLocalEngine = ""
 End Function
 
 Public Sub BrowseFile()
@@ -118,6 +178,9 @@ Public Sub ConvertToPDF()
     Dim ws As Object
     Set ws = ThisWorkbook.Sheets("Converter")
     
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
     Dim serverUrl As String, filePath As String, paperChoice As String, themeChoice As String, outFolder As String
     serverUrl = Trim(ws.Range("B4").Value)
     filePath = Trim(ws.Range("B7").Value)
@@ -125,8 +188,8 @@ Public Sub ConvertToPDF()
     themeChoice = Trim(ws.Range("B11").Value)
     outFolder = Trim(ws.Range("B13").Value)
     
-    ' Validate CAD file
-    If filePath = "" Or Dir(filePath) = "" Then
+    ' Validate CAD file existence safely via FSO
+    If filePath = "" Or Not fso.FileExists(filePath) Then
         If Application.Visible Then MsgBox "Please select a valid .dgn or CAD drawing file first.", vbExclamation, "File Not Found"
         ws.Range("B18").Value = "Error: File not found."
         ws.Range("B18").Font.Color = RGB(220, 38, 38)
@@ -159,20 +222,20 @@ Public Sub ConvertToPDF()
         themeCode = "white"
     End If
     
-    ' Check if Offline Engine is available
-    Dim localEngine As String
-    localEngine = GetLocalEngine()
-    
-    ' Determine output folder
+    ' Determine output folder safely (default = same folder as the input file)
     Dim saveDir As String
-    If outFolder <> "" And Dir(outFolder, vbDirectory) <> "" Then
+    If outFolder <> "" And fso.FolderExists(outFolder) Then
         saveDir = outFolder
     Else
-        saveDir = ThisWorkbook.Path & "\outputs"
-        On Error Resume Next
-        If Dir(saveDir, vbDirectory) = "" Then MkDir saveDir
-        On Error GoTo 0
-        If Dir(saveDir, vbDirectory) = "" Then saveDir = Left(filePath, InStrRev(filePath, "\") - 1)
+        saveDir = Left(filePath, InStrRev(filePath, "\") - 1)
+        If Not fso.FolderExists(saveDir) Then
+            saveDir = GetLocalWorkbookPath() & "\outputs"
+            If Not fso.FolderExists(saveDir) Then
+                On Error Resume Next
+                fso.CreateFolder saveDir
+                On Error GoTo 0
+            End If
+        End If
     End If
     If Right(saveDir, 1) <> "\" Then saveDir = saveDir & "\"
     
@@ -184,6 +247,10 @@ Public Sub ConvertToPDF()
     finalPdfPath = saveDir & baseName & ".pdf"
     finalThumbPath = saveDir & baseName & "_thumb.png"
     
+    ' Check if Offline Engine is available
+    Dim localEngine As String
+    localEngine = GetLocalEngine()
+    
     ' =========================================================================
     ' 1. LOCAL OFFLINE MODE (ZERO INTERNET / ZERO CLOUD)
     ' =========================================================================
@@ -192,14 +259,11 @@ Public Sub ConvertToPDF()
         ws.Range("B18").Font.Color = RGB(37, 99, 235)
         DoEvents
         
-        Dim optsJson As String
-        optsJson = "{""paper_size"":""" & paperCode & """,""theme"":""" & themeCode & """,""orientation"":""auto""}"
-        
         Dim metaJsonPath As String
         metaJsonPath = finalPdfPath & ".meta.json"
         On Error Resume Next
-        If Dir(metaJsonPath) <> "" Then Kill metaJsonPath
-        If Dir(finalPdfPath) <> "" Then Kill finalPdfPath
+        If fso.FileExists(metaJsonPath) Then fso.DeleteFile metaJsonPath, True
+        If fso.FileExists(finalPdfPath) Then fso.DeleteFile finalPdfPath, True
         On Error GoTo 0
         
         Dim wsh As Object, execCmd As String, exitCode As Long
@@ -214,9 +278,9 @@ Public Sub ConvertToPDF()
         tElapsed = Timer - tStart
         If tElapsed < 0 Then tElapsed = 0
         
-        If Dir(finalPdfPath) = "" Then
+        If Not fso.FileExists(finalPdfPath) Then
             Dim errDetail As String
-            If Dir(metaJsonPath) <> "" Then
+            If fso.FileExists(metaJsonPath) Then
                 errDetail = ReadTextFile(metaJsonPath)
             Else
                 errDetail = "Engine exited with code " & exitCode
@@ -228,10 +292,10 @@ Public Sub ConvertToPDF()
         End If
         
         Dim resJson As String
-        If Dir(metaJsonPath) <> "" Then
+        If fso.FileExists(metaJsonPath) Then
             resJson = ReadTextFile(metaJsonPath)
             On Error Resume Next
-            Kill metaJsonPath
+            fso.DeleteFile metaJsonPath, True
             On Error GoTo 0
         Else
             resJson = ""
@@ -243,7 +307,11 @@ Public Sub ConvertToPDF()
         vecCount = ExtractJsonVal(resJson, "vector_elements_count")
         If vecCount = "" Then vecCount = "CAD"
         outSize = ExtractJsonVal(resJson, "output_size_formatted")
-        If outSize = "" Then outSize = Format(FileLen(finalPdfPath) / 1024, "0.0") & " KB"
+        If outSize = "" Then
+            On Error Resume Next
+            outSize = Format(FileLen(finalPdfPath) / 1024, "0.0") & " KB"
+            On Error GoTo 0
+        End If
         
         ws.Range("B18").Value = ChrW(10003) & " Successfully converted in " & Format(tElapsed, "0.00") & "s (100% Offline)!"
         ws.Range("B18").Font.Color = RGB(22, 101, 52)
@@ -255,7 +323,7 @@ Public Sub ConvertToPDF()
         ws.Range("B22").Font.Underline = 2
         ws.Range("B22").Font.Color = RGB(37, 99, 235)
         
-        If Dir(finalThumbPath) <> "" Then
+        If fso.FileExists(finalThumbPath) Then
             Call DisplayThumbnailImage(ws, finalThumbPath)
         End If
         
@@ -272,9 +340,32 @@ Public Sub ConvertToPDF()
     ' =========================================================================
     ' 2. CLOUD SERVER MODE (FALLBACK IF LOCAL ENGINE NOT FOUND)
     ' =========================================================================
-    If InStr(1, serverUrl, "http", vbTextCompare) = 0 Then
-        serverUrl = "http://localhost:5000"
+    If InStr(1, ThisWorkbook.Path, "Temp", vbTextCompare) > 0 Or InStr(1, ThisWorkbook.Path, "zip", vbTextCompare) > 0 Then
+        If Application.Visible Then
+            MsgBox "PLEASE EXTRACT THE ZIP FILE FIRST!" & vbCrLf & vbCrLf & _
+                   "You opened DGN_Converter.xlsm directly from inside the ZIP file." & vbCrLf & _
+                   "Windows prevents the conversion engine from running while inside a zip." & vbCrLf & vbCrLf & _
+                   "What to do:" & vbCrLf & _
+                   "1. Close this Excel file." & vbCrLf & _
+                   "2. Right-click 'DGN_Offline_Converter.zip' -> click 'Extract All...'." & vbCrLf & _
+                   "3. Open the extracted 'DGN_Converter.xlsm'.", vbExclamation, "Extract ZIP First"
+        End If
+        ws.Range("B18").Value = "Error: Please EXTRACT the ZIP folder before opening."
+        ws.Range("B18").Font.Color = RGB(220, 38, 38)
+        Exit Sub
     End If
+    
+    If InStr(1, serverUrl, "http", vbTextCompare) = 0 Then
+        If Application.Visible Then
+            MsgBox "OFFLINE ENGINE NOT FOUND!" & vbCrLf & vbCrLf & _
+                   "The 'engine' folder must be kept next to 'DGN_Converter.xlsm'." & vbCrLf & vbCrLf & _
+                   "Please make sure the full ZIP package is extracted.", vbExclamation, "Engine Not Found"
+        End If
+        ws.Range("B18").Value = "Engine not found. Keep 'engine' folder next to Excel file."
+        ws.Range("B18").Font.Color = RGB(220, 38, 38)
+        Exit Sub
+    End If
+    
     If Right(serverUrl, 1) = "/" Then serverUrl = Left(serverUrl, Len(serverUrl) - 1)
     
     ws.Range("B18").Value = "Reading CAD file & uploading to server..."
@@ -404,7 +495,7 @@ Public Sub ConvertToPDF()
         WriteBase64File thumbB64, tempImg
         Call DisplayThumbnailImage(ws, tempImg)
         On Error Resume Next
-        Kill tempImg
+        If fso.FileExists(tempImg) Then fso.DeleteFile tempImg, True
         On Error GoTo 0
     End If
     
@@ -419,12 +510,14 @@ End Sub
 
 Private Sub DisplayThumbnailImage(ByVal ws As Object, ByVal imgPath As String)
     On Error Resume Next
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FileExists(imgPath) Then Exit Sub
+    
     Dim shp As Object
     For Each shp In ws.Shapes
         If shp.Name = "LiveCADPreview" Then shp.Delete
     Next shp
-    
-    If Dir(imgPath) = "" Then Exit Sub
     
     Dim targetBox As Object
     Set targetBox = ws.Range("E4:K24")
@@ -456,10 +549,13 @@ End Sub
 Public Sub OpenOutputPDF()
     Dim ws As Object
     Set ws = ThisWorkbook.Sheets("Converter")
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
     Dim linkAddr As String
     If ws.Range("B22").Hyperlinks.Count > 0 Then
         linkAddr = ws.Range("B22").Hyperlinks(1).Address
-        If Dir(linkAddr) <> "" Then
+        If fso.FileExists(linkAddr) Then
             Dim wsh As Object
             Set wsh = CreateObject("WScript.Shell")
             wsh.Run """" & linkAddr & """"
@@ -749,6 +845,18 @@ def create_workbook():
 
         wb.SaveAs(EXCEL_PATH, 52)
         print(f"Successfully generated: {EXCEL_PATH}")
+
+        # Also copy directly to Desktop extracted folder if it exists!
+        desktop_dest = os.path.expanduser(r"~\OneDrive\Desktop\DGN_Offline_Converter\DGN_Converter.xlsm")
+        if not os.path.exists(os.path.dirname(desktop_dest)):
+            desktop_dest = os.path.expanduser(r"~\Desktop\DGN_Offline_Converter\DGN_Converter.xlsm")
+        
+        if os.path.exists(os.path.dirname(desktop_dest)):
+            try:
+                shutil.copy2(EXCEL_PATH, desktop_dest)
+                print(f"Updated Desktop workbook directly: {desktop_dest}")
+            except Exception as e:
+                print(f"Could not copy to desktop: {e}")
 
     finally:
         wb.Close(SaveChanges=False)

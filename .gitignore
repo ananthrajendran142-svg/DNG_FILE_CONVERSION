@@ -16,7 +16,13 @@ outputs/
 !samples/*.dgn
 samples/House_Model.dgn
 
-# Office lock files
+# Standalone Engine & Build Artifacts
+engine/
+build/
+dist/
+*.spec
+*.zip
+
 ~$*
 
 # Environment & IDE

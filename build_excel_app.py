@@ -1,5 +1,6 @@
 """
-Builds the standalone, web-connected DGN_Converter.xlsm workbook with embedded VBA macros.
+Builds the standalone, offline-ready DGN_Converter.xlsm workbook with embedded VBA macros.
+Supports 100% Offline Local Engine (via engine\\dgn_engine.exe) and Cloud API fallback.
 """
 
 import os
@@ -11,16 +12,32 @@ EXCEL_PATH = os.path.abspath("DGN_Converter.xlsm")
 VBA_CODE = r'''Option Explicit
 
 ' ==============================================================================
-' DGN TO VECTOR PDF CONVERTER - WEB-CONNECTED EXCEL CLIENT
+' DGN TO VECTOR PDF CONVERTER - 100% OFFLINE & CLOUD EXCEL CLIENT
 ' ==============================================================================
+
+Private Function GetLocalEngine() As String
+    Dim p1 As String, p2 As String
+    p1 = ThisWorkbook.Path & "\engine\dgn_engine.exe"
+    p2 = ThisWorkbook.Path & "\dgn_engine.exe"
+    
+    If Dir(p1) <> "" Then
+        GetLocalEngine = p1
+    ElseIf Dir(p2) <> "" Then
+        GetLocalEngine = p2
+    Else
+        GetLocalEngine = ""
+    End If
+End Function
 
 Public Sub BrowseFile()
     Dim fd As Object
     Set fd = Application.FileDialog(3) ' 3 = msoFileDialogFilePicker
     With fd
-        .Title = "Select MicroStation DGN CAD File"
+        .Title = "Select CAD Drawing File (MicroStation DGN, AutoCAD DWG/DXF)"
         .Filters.Clear
         .Filters.Add "MicroStation DGN Files (*.dgn)", "*.dgn"
+        .Filters.Add "AutoCAD Drawings (*.dwg;*.dxf)", "*.dwg;*.dxf"
+        .Filters.Add "All CAD Files (*.dgn;*.dwg;*.dxf)", "*.dgn;*.dwg;*.dxf"
         .Filters.Add "All Files (*.*)", "*.*"
         .AllowMultiSelect = False
         If .Show = -1 Then
@@ -32,12 +49,36 @@ Public Sub BrowseFile()
 End Sub
 
 Public Sub TestConnection()
+    Dim ws As Object
+    Set ws = ThisWorkbook.Sheets("Converter")
+    
+    Dim localEngine As String
+    localEngine = GetLocalEngine()
+    
+    If localEngine <> "" Then
+        If Application.Visible Then
+            MsgBox "100% OFFLINE ENGINE ACTIVE!" & vbCrLf & vbCrLf & _
+                   "Engine: " & localEngine & vbCrLf & vbCrLf & _
+                   "• No internet connection needed" & vbCrLf & _
+                   "• No firewall or proxy restrictions" & vbCrLf & _
+                   "• 100% secure: files stay on this laptop" & vbCrLf & vbCrLf & _
+                   "Ready to convert your drawings safely.", vbInformation, "Offline Engine Ready"
+        End If
+        ws.Range("B18").Value = ChrW(10003) & " Offline Engine Ready (Zero Internet Needed)"
+        ws.Range("B18").Font.Color = RGB(22, 101, 52)
+        Exit Sub
+    End If
+    
     Dim serverUrl As String
-    serverUrl = Trim(ThisWorkbook.Sheets("Converter").Range("B4").Value)
+    serverUrl = Trim(ws.Range("B4").Value)
+    If InStr(1, serverUrl, "http", vbTextCompare) = 0 Then
+        serverUrl = "http://localhost:5000"
+        ws.Range("B4").Value = serverUrl
+    End If
     If Right(serverUrl, 1) = "/" Then serverUrl = Left(serverUrl, Len(serverUrl) - 1)
     
-    ThisWorkbook.Sheets("Converter").Range("B18").Value = "Testing connection to " & serverUrl & "..."
-    ThisWorkbook.Sheets("Converter").Range("B18").Font.Color = RGB(37, 99, 235)
+    ws.Range("B18").Value = "Testing connection to " & serverUrl & "..."
+    ws.Range("B18").Font.Color = RGB(37, 99, 235)
     DoEvents
     
     On Error Resume Next
@@ -48,29 +89,28 @@ Public Sub TestConnection()
     http.send
     
     If Err.Number <> 0 Then
-        If Application.UserControl Then
+        If Application.Visible Then
             MsgBox "Cannot reach server at:" & vbCrLf & serverUrl & vbCrLf & vbCrLf & _
-                   "Error: " & Err.Description & vbCrLf & vbCrLf & _
-                   "Please make sure the server URL is correct and running.", vbCritical, "Connection Failed"
+                   "Error: " & Err.Description, vbCritical, "Connection Failed"
         End If
-        ThisWorkbook.Sheets("Converter").Range("B18").Value = "Connection failed: Cannot reach server."
-        ThisWorkbook.Sheets("Converter").Range("B18").Font.Color = RGB(220, 38, 38)
+        ws.Range("B18").Value = "Connection failed: Cannot reach server."
+        ws.Range("B18").Font.Color = RGB(220, 38, 38)
         Exit Sub
     End If
     
     If http.Status = 200 Then
-        If Application.UserControl Then
-            MsgBox "Server is ONLINE and ready!" & vbCrLf & vbCrLf & _
+        If Application.Visible Then
+            MsgBox "Cloud Server is ONLINE and ready!" & vbCrLf & vbCrLf & _
                    "Connected to: " & serverUrl, vbInformation, "Server Online"
         End If
-        ThisWorkbook.Sheets("Converter").Range("B18").Value = ChrW(10003) & " Server is Online and Ready."
-        ThisWorkbook.Sheets("Converter").Range("B18").Font.Color = RGB(22, 101, 52)
+        ws.Range("B18").Value = ChrW(10003) & " Cloud Server is Online and Ready."
+        ws.Range("B18").Font.Color = RGB(22, 101, 52)
     Else
-        If Application.UserControl Then
+        If Application.Visible Then
             MsgBox "Server responded with HTTP " & http.Status & vbCrLf & http.responseText, vbExclamation, "Unexpected Response"
         End If
-        ThisWorkbook.Sheets("Converter").Range("B18").Value = "Server error HTTP " & http.Status
-        ThisWorkbook.Sheets("Converter").Range("B18").Font.Color = RGB(220, 38, 38)
+        ws.Range("B18").Value = "Server error HTTP " & http.Status
+        ws.Range("B18").Font.Color = RGB(220, 38, 38)
     End If
 End Sub
 
@@ -85,11 +125,9 @@ Public Sub ConvertToPDF()
     themeChoice = Trim(ws.Range("B11").Value)
     outFolder = Trim(ws.Range("B13").Value)
     
-    If Right(serverUrl, 1) = "/" Then serverUrl = Left(serverUrl, Len(serverUrl) - 1)
-    
-    ' Validate DGN file
+    ' Validate CAD file
     If filePath = "" Or Dir(filePath) = "" Then
-        If Application.UserControl Then MsgBox "Please select a valid .dgn file first.", vbExclamation, "File Not Found"
+        If Application.Visible Then MsgBox "Please select a valid .dgn or CAD drawing file first.", vbExclamation, "File Not Found"
         ws.Range("B18").Value = "Error: File not found."
         ws.Range("B18").Font.Color = RGB(220, 38, 38)
         Exit Sub
@@ -121,16 +159,132 @@ Public Sub ConvertToPDF()
         themeCode = "white"
     End If
     
-    ' Update status
-    ws.Range("B18").Value = "Reading CAD file & uploading..."
+    ' Check if Offline Engine is available
+    Dim localEngine As String
+    localEngine = GetLocalEngine()
+    
+    ' Determine output folder
+    Dim saveDir As String
+    If outFolder <> "" And Dir(outFolder, vbDirectory) <> "" Then
+        saveDir = outFolder
+    Else
+        saveDir = ThisWorkbook.Path & "\outputs"
+        On Error Resume Next
+        If Dir(saveDir, vbDirectory) = "" Then MkDir saveDir
+        On Error GoTo 0
+        If Dir(saveDir, vbDirectory) = "" Then saveDir = Left(filePath, InStrRev(filePath, "\") - 1)
+    End If
+    If Right(saveDir, 1) <> "\" Then saveDir = saveDir & "\"
+    
+    Dim baseName As String
+    baseName = Mid(filePath, InStrRev(filePath, "\") + 1)
+    If InStrRev(baseName, ".") > 0 Then baseName = Left(baseName, InStrRev(baseName, ".") - 1)
+    
+    Dim finalPdfPath As String, finalThumbPath As String
+    finalPdfPath = saveDir & baseName & ".pdf"
+    finalThumbPath = saveDir & baseName & "_thumb.png"
+    
+    ' =========================================================================
+    ' 1. LOCAL OFFLINE MODE (ZERO INTERNET / ZERO CLOUD)
+    ' =========================================================================
+    If localEngine <> "" Then
+        ws.Range("B18").Value = "Converting CAD drawing locally (Offline Mode)..."
+        ws.Range("B18").Font.Color = RGB(37, 99, 235)
+        DoEvents
+        
+        Dim optsJson As String
+        optsJson = "{""paper_size"":""" & paperCode & """,""theme"":""" & themeCode & """,""orientation"":""auto""}"
+        
+        Dim metaJsonPath As String
+        metaJsonPath = finalPdfPath & ".meta.json"
+        On Error Resume Next
+        If Dir(metaJsonPath) <> "" Then Kill metaJsonPath
+        If Dir(finalPdfPath) <> "" Then Kill finalPdfPath
+        On Error GoTo 0
+        
+        Dim wsh As Object, execCmd As String, exitCode As Long
+        Set wsh = CreateObject("WScript.Shell")
+        
+        ' Run local engine directly with clean string arguments
+        execCmd = """" & localEngine & """ """ & filePath & """ """ & finalPdfPath & """ """ & finalThumbPath & """ """ & paperCode & """ """ & themeCode & """"
+        
+        Dim tStart As Double, tElapsed As Double
+        tStart = Timer
+        exitCode = wsh.Run(execCmd, 0, True)
+        tElapsed = Timer - tStart
+        If tElapsed < 0 Then tElapsed = 0
+        
+        If Dir(finalPdfPath) = "" Then
+            Dim errDetail As String
+            If Dir(metaJsonPath) <> "" Then
+                errDetail = ReadTextFile(metaJsonPath)
+            Else
+                errDetail = "Engine exited with code " & exitCode
+            End If
+            If Application.Visible Then MsgBox "Local conversion failed." & vbCrLf & vbCrLf & errDetail, vbCritical, "Conversion Error"
+            ws.Range("B18").Value = "Error: Local conversion failed."
+            ws.Range("B18").Font.Color = RGB(220, 38, 38)
+            Exit Sub
+        End If
+        
+        Dim resJson As String
+        If Dir(metaJsonPath) <> "" Then
+            resJson = ReadTextFile(metaJsonPath)
+            On Error Resume Next
+            Kill metaJsonPath
+            On Error GoTo 0
+        Else
+            resJson = ""
+        End If
+        
+        Dim dgnVer As String, vecCount As String, outSize As String
+        dgnVer = ExtractJsonVal(resJson, "dgn_version")
+        If dgnVer = "" Then dgnVer = "MicroStation DGN"
+        vecCount = ExtractJsonVal(resJson, "vector_elements_count")
+        If vecCount = "" Then vecCount = "CAD"
+        outSize = ExtractJsonVal(resJson, "output_size_formatted")
+        If outSize = "" Then outSize = Format(FileLen(finalPdfPath) / 1024, "0.0") & " KB"
+        
+        ws.Range("B18").Value = ChrW(10003) & " Successfully converted in " & Format(tElapsed, "0.00") & "s (100% Offline)!"
+        ws.Range("B18").Font.Color = RGB(22, 101, 52)
+        ws.Range("B19").Value = dgnVer
+        ws.Range("B20").Value = vecCount & " elements"
+        ws.Range("B21").Value = Format(tElapsed, "0.00") & " s (" & outSize & ")"
+        
+        ws.Hyperlinks.Add Anchor:=ws.Range("B22"), Address:=finalPdfPath, TextToDisplay:=baseName & ".pdf"
+        ws.Range("B22").Font.Underline = 2
+        ws.Range("B22").Font.Color = RGB(37, 99, 235)
+        
+        If Dir(finalThumbPath) <> "" Then
+            Call DisplayThumbnailImage(ws, finalThumbPath)
+        End If
+        
+        If Application.Visible Then
+            MsgBox "CAD drawing converted successfully (100% Offline)!" & vbCrLf & vbCrLf & _
+                   "File: " & baseName & ".pdf" & vbCrLf & _
+                   "Saved to: " & finalPdfPath & vbCrLf & _
+                   "Vectors: " & vecCount & " elements" & vbCrLf & _
+                   "Time: " & Format(tElapsed, "0.00") & "s", vbInformation, "Conversion Complete"
+        End If
+        Exit Sub
+    End If
+    
+    ' =========================================================================
+    ' 2. CLOUD SERVER MODE (FALLBACK IF LOCAL ENGINE NOT FOUND)
+    ' =========================================================================
+    If InStr(1, serverUrl, "http", vbTextCompare) = 0 Then
+        serverUrl = "http://localhost:5000"
+    End If
+    If Right(serverUrl, 1) = "/" Then serverUrl = Left(serverUrl, Len(serverUrl) - 1)
+    
+    ws.Range("B18").Value = "Reading CAD file & uploading to server..."
     ws.Range("B18").Font.Color = RGB(37, 99, 235)
     DoEvents
     
-    ' Read file to Base64
     Dim fileB64 As String
     fileB64 = ReadFileBase64(filePath)
     If fileB64 = "" Then
-        If Application.UserControl Then MsgBox "Failed to read DGN file bytes.", vbCritical, "Read Error"
+        If Application.Visible Then MsgBox "Failed to read CAD file bytes.", vbCritical, "Read Error"
         ws.Range("B18").Value = "Error: Could not read file."
         ws.Range("B18").Font.Color = RGB(220, 38, 38)
         Exit Sub
@@ -139,7 +293,6 @@ Public Sub ConvertToPDF()
     Dim fileName As String
     fileName = Mid(filePath, InStrRev(filePath, "\") + 1)
     
-    ' Construct JSON payload
     Dim payload As String
     payload = "{" & _
               """file_name"": """ & EscapeJson(fileName) & """," & _
@@ -152,7 +305,6 @@ Public Sub ConvertToPDF()
     ws.Range("B18").Font.Color = RGB(37, 99, 235)
     DoEvents
     
-    ' Send HTTP request
     On Error Resume Next
     Dim http As Object
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
@@ -162,7 +314,7 @@ Public Sub ConvertToPDF()
     http.send payload
     
     If Err.Number <> 0 Then
-        If Application.UserControl Then MsgBox "HTTP request failed:" & vbCrLf & Err.Description, vbCritical, "Network Error"
+        If Application.Visible Then MsgBox "HTTP request failed:" & vbCrLf & Err.Description, vbCritical, "Network Error"
         ws.Range("B18").Value = "Network Error: Cannot connect to server."
         ws.Range("B18").Font.Color = RGB(220, 38, 38)
         Exit Sub
@@ -171,7 +323,7 @@ Public Sub ConvertToPDF()
     If http.Status <> 200 Then
         Dim errResp As String
         errResp = http.responseText
-        If Application.UserControl Then
+        If Application.Visible Then
             MsgBox "Server Conversion Error (HTTP " & http.Status & "):" & vbCrLf & vbCrLf & _
                    ExtractJsonVal(errResp, "error"), vbCritical, "Conversion Error"
         End If
@@ -180,14 +332,13 @@ Public Sub ConvertToPDF()
         Exit Sub
     End If
     
-    ' Parse response
     Dim respText As String
     respText = http.responseText
     
     Dim successVal As String
     successVal = ExtractJsonVal(respText, "success")
     If LCase(successVal) <> "true" Then
-        If Application.UserControl Then MsgBox "Conversion failed:" & vbCrLf & ExtractJsonVal(respText, "error"), vbCritical, "Failed"
+        If Application.Visible Then MsgBox "Conversion failed:" & vbCrLf & ExtractJsonVal(respText, "error"), vbCritical, "Failed"
         ws.Range("B18").Value = "Conversion failed."
         ws.Range("B18").Font.Color = RGB(220, 38, 38)
         Exit Sub
@@ -199,19 +350,6 @@ Public Sub ConvertToPDF()
     pdfName = ExtractJsonVal(respText, "pdf_filename")
     If pdfName = "" Then pdfName = Left(fileName, InStrRev(fileName, ".") - 1) & ".pdf"
     
-    ' Determine output path
-    Dim saveDir As String
-    If outFolder <> "" And Dir(outFolder, vbDirectory) <> "" Then
-        saveDir = outFolder
-    Else
-        saveDir = Left(filePath, InStrRev(filePath, "\") - 1)
-    End If
-    If Right(saveDir, 1) <> "\" Then saveDir = saveDir & "\"
-    
-    Dim finalPdfPath As String
-    finalPdfPath = saveDir & pdfName
-    
-    ' Save PDF file (via streaming download or fallback base64)
     Dim dlUrl As String
     dlUrl = ExtractJsonVal(respText, "download_url")
     Dim pdfSaved As Boolean
@@ -230,10 +368,10 @@ Public Sub ConvertToPDF()
         If httpDl.Status = 200 Then
             Dim streamOut As Object
             Set streamOut = CreateObject("ADODB.Stream")
-            streamOut.Type = 1 ' adTypeBinary
+            streamOut.Type = 1
             streamOut.Open
             streamOut.Write httpDl.responseBody
-            streamOut.SaveToFile finalPdfPath, 2 ' adSaveCreateOverWrite
+            streamOut.SaveToFile finalPdfPath, 2
             streamOut.Close
             pdfSaved = True
         End If
@@ -244,72 +382,75 @@ Public Sub ConvertToPDF()
         pdfSaved = True
     End If
     
-    ' Extract metadata
-    Dim dgnVer As String, vecCount As String, timeSec As String, outSize As String
+    Dim timeSec As String
     dgnVer = ExtractJsonVal(respText, "dgn_version")
     vecCount = ExtractJsonVal(respText, "vector_elements_count")
     timeSec = ExtractJsonVal(respText, "total_time_seconds")
     outSize = ExtractJsonVal(respText, "output_size_formatted")
     
-    ' Update Results Card
     ws.Range("B18").Value = ChrW(10003) & " Successfully converted in " & timeSec & "s!"
     ws.Range("B18").Font.Color = RGB(22, 101, 52)
     ws.Range("B19").Value = dgnVer
     ws.Range("B20").Value = vecCount & " elements"
     ws.Range("B21").Value = timeSec & " s (" & outSize & ")"
     
-    ' Hyperlink to PDF
     ws.Hyperlinks.Add Anchor:=ws.Range("B22"), Address:=finalPdfPath, TextToDisplay:=pdfName
-    ws.Range("B22").Font.Underline = 2 ' xlUnderlineStyleSingle
+    ws.Range("B22").Font.Underline = 2
     ws.Range("B22").Font.Color = RGB(37, 99, 235)
     
-    ' Update Live Drawing Preview
     If thumbB64 <> "" Then
         Dim tempImg As String
         tempImg = Environ("TEMP") & "\dgn_preview_" & Format(Now, "hhmmss") & ".png"
         WriteBase64File thumbB64, tempImg
-        
-        Dim shp As Object
-        For Each shp In ws.Shapes
-            If shp.Name = "LiveCADPreview" Then shp.Delete
-        Next shp
-        
-        Dim targetBox As Object
-        Set targetBox = ws.Range("E4:K24")
-        Dim pic As Object
-        Set pic = ws.Shapes.AddPicture(tempImg, 0, 1, targetBox.Left + 8, targetBox.Top + 8, -1, -1)
-        pic.Name = "LiveCADPreview"
-        pic.LockAspectRatio = 1
-        
-        Dim maxW As Double, maxH As Double
-        maxW = targetBox.Width - 16
-        maxH = targetBox.Height - 16
-        
-        If pic.Width > maxW Then
-            pic.Width = maxW
-        End If
-        If pic.Height > maxH Then
-            pic.Height = maxH
-        End If
-        
-        ' Center inside targetBox
-        pic.Left = targetBox.Left + (targetBox.Width - pic.Width) / 2
-        pic.Top = targetBox.Top + (targetBox.Height - pic.Height) / 2
-        pic.Line.Color.RGB = RGB(148, 163, 184)
-        pic.Line.Weight = 1
-        
+        Call DisplayThumbnailImage(ws, tempImg)
         On Error Resume Next
         Kill tempImg
         On Error GoTo 0
     End If
     
-    If Application.UserControl Then
+    If Application.Visible Then
         MsgBox "Drawing converted successfully!" & vbCrLf & vbCrLf & _
                "File: " & pdfName & vbCrLf & _
                "Saved to: " & finalPdfPath & vbCrLf & _
                "Vectors: " & vecCount & " elements" & vbCrLf & _
                "Time: " & timeSec & "s", vbInformation, "Conversion Complete"
     End If
+End Sub
+
+Private Sub DisplayThumbnailImage(ByVal ws As Object, ByVal imgPath As String)
+    On Error Resume Next
+    Dim shp As Object
+    For Each shp In ws.Shapes
+        If shp.Name = "LiveCADPreview" Then shp.Delete
+    Next shp
+    
+    If Dir(imgPath) = "" Then Exit Sub
+    
+    Dim targetBox As Object
+    Set targetBox = ws.Range("E4:K24")
+    
+    Dim pic As Object
+    Set pic = ws.Pictures.Insert(imgPath)
+    If pic Is Nothing Then
+        Set pic = ws.Shapes.AddPicture(imgPath, 0, 1, targetBox.Left + 8, targetBox.Top + 8, 200, 200)
+    End If
+    
+    If Not pic Is Nothing Then
+        pic.Name = "LiveCADPreview"
+        On Error Resume Next
+        pic.ShapeRange.LockAspectRatio = 1
+        
+        Dim maxW As Double, maxH As Double
+        maxW = targetBox.Width - 16
+        maxH = targetBox.Height - 16
+        
+        If pic.Width > maxW Then pic.Width = maxW
+        If pic.Height > maxH Then pic.Height = maxH
+        
+        pic.Left = targetBox.Left + (targetBox.Width - pic.Width) / 2
+        pic.Top = targetBox.Top + (targetBox.Height - pic.Height) / 2
+    End If
+    On Error GoTo 0
 End Sub
 
 Public Sub OpenOutputPDF()
@@ -325,14 +466,25 @@ Public Sub OpenOutputPDF()
             Exit Sub
         End If
     End If
-    If Application.UserControl Then MsgBox "No converted PDF available to open yet. Please convert a DGN file first.", vbExclamation, "No PDF"
+    If Application.Visible Then MsgBox "No converted PDF available to open yet. Please convert a DGN file first.", vbExclamation, "No PDF"
 End Sub
+
+Private Function ReadTextFile(ByVal filePath As String) As String
+    On Error Resume Next
+    Dim fso As Object, ts As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(filePath) Then
+        Set ts = fso.OpenTextFile(filePath, 1)
+        ReadTextFile = ts.ReadAll
+        ts.Close
+    End If
+End Function
 
 Private Function ReadFileBase64(ByVal filePath As String) As String
     On Error GoTo ErrHandler
     Dim stream As Object
     Set stream = CreateObject("ADODB.Stream")
-    stream.Type = 1 ' adTypeBinary
+    stream.Type = 1
     stream.Open
     stream.LoadFromFile filePath
     
@@ -362,10 +514,10 @@ Private Sub WriteBase64File(ByVal base64Str As String, ByVal outPath As String)
     
     Dim stream As Object
     Set stream = CreateObject("ADODB.Stream")
-    stream.Type = 1 ' adTypeBinary
+    stream.Type = 1
     stream.Open
     stream.Write node.nodeTypedValue
-    stream.SaveToFile outPath, 2 ' 2 = adSaveCreateOverWrite
+    stream.SaveToFile outPath, 2
     stream.Close
 End Sub
 
@@ -385,7 +537,6 @@ Private Function ExtractJsonVal(ByVal json As String, ByVal key As String) As St
         Exit Function
     End If
     
-    ' Fallback for numbers or booleans (unquoted)
     pattern = """" & key & """\s*:\s*([^,\}\]]+)"
     reg.Pattern = pattern
     If reg.Test(json) Then
@@ -434,7 +585,6 @@ def create_workbook():
         C_TEXT_MAIN = 0x1E293B
         C_TEXT_MUTED = 0x64748B
         C_BORDER = 0xE2E8F0
-        C_BLUE_BTN = 0xEB6325  # BGR for #2563EB
 
         # Set Column Widths
         ws.Columns("A").ColumnWidth = 3
@@ -454,8 +604,8 @@ def create_workbook():
         # -------------------------------------------------------------
         header = ws.Range("B2:K2")
         header.Merge()
-        header.Value = "📐  MicroStation DGN to Vector PDF Converter"
-        header.Font.Size = 16
+        header.Value = "📐  MicroStation DGN to Vector PDF Converter (Offline & Cloud)"
+        header.Font.Size = 15
         header.Font.Bold = True
         header.Font.Color = C_WHITE
         header.Interior.Color = C_NAVY
@@ -483,9 +633,9 @@ def create_workbook():
             c.RowHeight = 22
             c.VerticalAlignment = -4108
 
-        # Server API URL
-        set_label("B3", "SERVER API ENDPOINT URL")
-        set_input("B4", "http://localhost:5000")
+        # Server API URL / Engine Mode
+        set_label("B3", "ENGINE / CONNECTION MODE")
+        set_input("B4", "Auto-Detect: Local Offline Engine (or enter Cloud URL)")
 
         # DGN File Path
         set_label("B6", "MICROSTATION DGN DRAWING FILE (.dgn)")
@@ -494,7 +644,6 @@ def create_workbook():
         # Paper Size
         set_label("B8", "PAPER SIZE")
         set_input("B9", "A1 Architectural (Recommended)")
-        # Dropdown validation for Paper Size
         val_paper = ws.Range("B9").Validation
         val_paper.Delete()
         val_paper.Add(3, 1, 1, "A1 Architectural (Recommended),A4 Standard,A3 Standard,A0 Large Format,US Letter")
@@ -502,7 +651,6 @@ def create_workbook():
         # Theme
         set_label("B10", "COLOR THEME")
         set_input("B11", "White (Standard Clean)")
-        # Dropdown validation for Theme
         val_theme = ws.Range("B11").Validation
         val_theme.Delete()
         val_theme.Add(3, 1, 1, "White (Standard Clean),Blueprint Blue,Dark CAD Station,Architectural Cream")
@@ -569,12 +717,12 @@ def create_workbook():
         btn_browse.Caption = "Browse"
         btn_browse.OnAction = "BrowseFile"
 
-        # Button 2: Test Server Connection (Row 4, Column C)
+        # Button 2: Test Engine Status (Row 4, Column C)
         btn_test = ws.Buttons().Add(ws.Range("C4").Left + 2, ws.Range("C4").Top + 1, 48, 20)
-        btn_test.Caption = "Test"
+        btn_test.Caption = "Status"
         btn_test.OnAction = "TestConnection"
 
-        # Button 3: Convert to PDF (Primary Action Button below inputs)
+        # Button 3: Convert to PDF
         btn_convert = ws.Buttons().Add(ws.Range("B15").Left, ws.Range("B15").Top, ws.Range("B15").Width, 28)
         btn_convert.Caption = "Convert DGN to Vector PDF"
         btn_convert.Font.Bold = True

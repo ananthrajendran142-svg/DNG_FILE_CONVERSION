@@ -1,3 +1,12 @@
+---
+title: DGN to PDF Converter
+emoji: 📐
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 5000
+---
+
 # DGN to PDF Converter 📐📄
 
 A high-performance Python tool and web application that converts Bentley MicroStation **DGN** CAD design files (both **V7 ISFF** and **V8 OLE**) into crisp, watermark-free vector **PDF** documents.

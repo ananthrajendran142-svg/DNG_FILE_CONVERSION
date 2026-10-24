@@ -21,11 +21,12 @@ RUN cp lib/lib*.so* /usr/lib/ 2>/dev/null || true && \
     cp lib/lib*.so* /usr/lib/x86_64-linux-gnu/ 2>/dev/null || true && \
     ldconfig 2>/dev/null || true
 
-# Expose Render PORT and configure .NET globalization
+# Expose ports for Hugging Face Spaces (7860), Render (5000), and Railway
 ENV PORT=5000
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 ENV COMPlus_GlobalizationInvariant=1
 ENV LD_LIBRARY_PATH=/app/lib:$LD_LIBRARY_PATH
 EXPOSE 5000
+EXPOSE 7860
 
 CMD ["python", "app.py"]
